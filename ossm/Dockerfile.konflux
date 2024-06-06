@@ -1,0 +1,27 @@
+FROM registry.ci.openshift.org/openshift/release:rhel-8-release-golang-1.22-openshift-4.17 AS gobuilder
+
+WORKDIR /src
+
+COPY . .
+
+RUN go version
+
+RUN mkdir /tmp/out
+
+# this will probably fail
+RUN dnf install -y \
+    bazel ninja-build gcc-toolset-12-libatomic-devel \
+    make patch xz automake python3 platform-python-devel \
+    clang-13.0.1 nodejs cmake openssl openssl-devel tzdata-java
+
+COPY build_proxy.sh $REMOTE_SOURCES_DIR/proxy/app/build_proxy.sh
+RUN bazel build //:envoybash
+
+###########################################################################
+#@follow_tag(registry.redhat.io/ubi9/ubi-minimal:latest)
+# TODO: why .access. ?
+FROM registry.access.redhat.com/ubi9/ubi-minimal:latest 
+
+# TODO: copy from cpaas dockerfile
+
+ENTRYPOINT [ "/usr/local/bin/pilot-discovery" ]
