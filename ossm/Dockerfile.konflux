@@ -1,29 +1,35 @@
 
-FROM registry.ci.openshift.org/openshift/release:rhel-8-release-golang-1.22-openshift-4.17 AS gobuilder
+#FROM registry.ci.openshift.org/openshift/release:rhel-8-release-golang-1.22-openshift-4.17 AS gobuilder
+FROM gcr.io/bazel-public/bazel:latest as builder
 
 WORKDIR /src
 
 COPY . .
 
-RUN go version
-
 RUN mkdir /tmp/out
 
 # this will probably fail
-RUN dnf install -y \
-    bazel ninja-build gcc-toolset-12-libatomic-devel \
-    make patch xz automake python3 platform-python-devel \
-    clang-13.0.1 nodejs cmake openssl openssl-devel tzdata-java
+#RUN dnf install -y \
+    #bazel ninja-build gcc-toolset-12-libatomic-devel \
+    #make patch xz automake python3 platform-python-devel \
+    #clang-13.0.1 nodejs cmake openssl openssl-devel tzdata-java
 
-COPY build_proxy.sh $REMOTE_SOURCES_DIR/proxy/app/build_proxy.sh
-RUN bazel build //:envoybash
+RUN bazel build //:envoy
+
+FROM quay.io/redhat-user-workloads/asmigala-tenant/sail-operator/istio-pilot-agent@sha256:bddf42a3a9597bc6fbdc90eb515866f22b84cdcb38a0bb90d73990d4d866c94d  AS pilot-agent
 
 ###########################################################################
 #@follow_tag(registry.redhat.io/ubi9/ubi-minimal:latest)
 # TODO: why .access. ?
 FROM registry.access.redhat.com/ubi9/ubi-minimal:latest 
 
-COPY --from=gobuilder /tmp/out/pilot-agent /usr/local/bin/pilot-agent
-# TODO: copy from cpaas dockerfile
+COPY --from=builder /tmp/out/pilot-agent /usr/local/bin/pilot-agent
+COPY --from=builder /tmp/out/envoy_bootstrap.json /var/lib/istio/envoy/envoy_bootstrap_tmpl.json
 
-ENTRYPOINT [ "/usr/local/bin/pilot-discovery" ]
+COPY --from=pilot-agent /tmp/out/pilot-agent /usr/local/bin/pilot-agent
+
+RUN mkdir -p /etc/istio/proxy && \
+    chmod g+w /etc/istio/proxy
+
+# The pilot-agent will bootstrap Envoy.
+ENTRYPOINT ["/usr/local/bin/pilot-agent"]
